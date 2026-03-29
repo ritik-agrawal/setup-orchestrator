@@ -1,300 +1,308 @@
-# Local Distributed Systems Orchestrator
+# Local Distributed Systems Orchestrator (v2)
 
 | Field | Value |
 |-------|-------|
 | **Author** | Ritik Agrawal |
-| **Version** | 1.0.0 |
+| **Version** | 2.0.0 |
 | **Created At** | 2026-03-26 |
-| **Updated At** | 2026-03-26 |
+| **Updated At** | 2026-03-29 |
+
+---
 
 ## Overview
-A local development orchestration system for managing multiple microservices with a modern web UI, supporting parallel builds, selective execution, and failure recovery.
+
+A lightweight **local process orchestrator** designed to manage multiple microservices without Docker. The system focuses on developer efficiency by enabling parallel builds, process-based execution, structured logging, and failure recovery — all through a CLI-driven interface and reusable core library.
 
 ---
 
-## Requirements
+## Design Philosophy
 
-### Core Functionality
-
-#### 1. Project Selection
-- UI to select multiple projects from a list
-- Checkbox-based selection interface
-- Support for running selected projects only
-
-#### 2. Branch & Environment Configuration
-- **Branch Selection**:
-  - Individual branch specification per project
-  - System handles git checkout before build
-  
-- **Environment Files**:
-  - Specify env file path per project during setup
-  - UI input for custom env file paths during setup
-
-#### 3. Build Phase
-- **Dockerfile Discovery**: Automatic or manual path specification (FIND-DOCKERFILE)
-- **Parallel Builds**: Build n projects simultaneously for speed
-- **Build Failure Handling**:
-  - Print detailed logs for debugging
-  - Failure of one project doesn't affect others
-  - Track build status per project
-  - **Resume Capability**: 
-    - Already-built projects in current session skip rebuild
-    - UI shows list of failed projects
-    - Option to rebuild only failed projects
-    - Loop until all succeed or user exits
-  - **Session Reset**: Fresh restart on new session (explicit exit)
-
-#### 4. Run Phase
-- Triggered only after all selected projects build successfully
-- **Parallel Execution**: Run all projects simultaneously
-- **Run Failure Handling**:
-  - Stream console logs for failed services
-  - Failure of one doesn't affect others
-  - UI reflects status of each project (running/failed)
-  - Option to restart only failed projects
-  - Real-time status updates
-
-#### 5. Session Management
-- Persist build/run state during active session
-- "Exit" button to terminate session explicitly
-- New session = fresh start (no cached state)
+- **No Docker**: Avoid heavy resource usage and improve responsiveness
+- **CLI-first approach**: Library + command-line interface instead of UI
+- **Process-based execution**: Run services using native commands
+- **Ephemeral state**: In-memory state with optional session file persistence
+- **Failure isolation**: One service failure does not impact others
+- **Extensibility via strategies**: Build, run, and logging behaviors are pluggable
 
 ---
 
-## Technical Approach
+## Core Features
 
-### Stack
-- **UI**: Streamlit (Python-based, modern, fast development)
-- **Orchestration**: Docker Compose + Python scripts
-- **Container Management**: Docker
-- **State Management**: JSON file for session persistence
-- **Dockerfile Discovery**: Custom shell script
+### 1. Project Selection
+- Select one or multiple services via CLI or config
+- Supports partial execution
 
-### Architecture
+---
 
+### 2. Git Integration
+- Automatic branch checkout before build
+- Flow:
+  - `git fetch`
+  - validate branch existence
+  - checkout branch
+- If branch is unavailable:
+  - mark service as **GIT_ERROR**
+  - skip build and run
+
+---
+
+### 3. Build Phase (Optional)
+- Each service defines its own build command
+- Supports parallel execution
+- Failure handling:
+  - Isolated per service
+  - Logs captured
+  - Failed services skipped in run phase
+
+---
+
+### 4. Run Phase (Process-Based)
+- Executes services using native commands
+- Parallel execution using thread pool
+- Tracks:
+  - PID
+  - status (running/failed/stopped)
+- Failure handling:
+  - Detect via process exit
+  - Restart capability (manual)
+
+---
+
+### 5. Logging System
+- All service outputs are piped to log files
+
+#### Structure
 ```
-local-orchestrator/
-├── ui/
-│   └── app.py                    # Streamlit UI
-├── orchestrator/
-│   ├── builder.py                # Build logic with parallel execution
-│   ├── runner.py                 # Run logic with parallel execution
-│   ├── git_manager.py            # Git branch checkout logic
-│   └── state_manager.py          # Session state persistence
-├── scripts/
-│   ├── find_dockerfile.sh        # Dockerfile discovery (FIND-DOCKERFILE)
-│   ├── check_dependencies.sh     # Validate system dependencies
-│   ├── install_dependencies.sh   # Install missing dependencies
-│   └── setup.sh                  # Initial setup script
-├── config/
-│   ├── projects.yaml             # Project definitions & paths
-│   └── session_state.json        # Build/run state tracking
-├── docker-compose.template.yml   # Dynamic compose file generation
-└── README.md                     # Setup instructions
-```
-
-### Key Components
-
-#### 1. Streamlit UI (`ui/app.py`)
-- Project selection (multi-select checkboxes)
-- Branch configuration section:
-  - Radio: "Same branch for all" with text input
-  - Individual project branch inputs
-- Environment file path inputs per project
-- Action buttons: Build, Run, Rebuild Failed, Restart Failed, Exit
-- Real-time status display with auto-refresh (2-5 seconds)
-- Log viewer for failures
-
-#### 2. Builder (`orchestrator/builder.py`)
-- Parallel build execution using `docker-compose build --parallel`
-- Build status tracking per project
-- Failure isolation
-- Resume logic (skip already-built projects)
-- Log capture and display
-
-#### 3. Runner (`orchestrator/runner.py`)
-- Parallel container startup
-- Health check monitoring
-- Status tracking (running/failed/stopped)
-- Selective restart capability
-- Log streaming
-
-#### 4. Git Manager (`orchestrator/git_manager.py`)
-- Branch checkout before build
-- Handle "same for all" vs project-specific logic
-- Validation and error handling
-
-#### 5. State Manager (`orchestrator/state_manager.py`)
-- Persist session state to JSON
-- Track: build status, run status, selected projects, branches, env paths
-- Clear state on exit
-
-#### 6. Dockerfile Discovery (`scripts/find_dockerfile.sh`)
-- Search for Dockerfile in project directory
-- Convention-based search: `./Dockerfile`, `./docker/Dockerfile`, etc.
-- Return path or error
-
-#### 7. Dependency Validation (`scripts/check_dependencies.sh`)
-- Check Docker installation and daemon status
-- Check Docker Compose installation and minimum version
-- Check Python installation and minimum version (3.8+)
-- Check Git installation
-- Check pip availability
-- Report all missing/outdated dependencies
-
-#### 8. Dependency Installation (`scripts/install_dependencies.sh`)
-- Auto-detect OS (Linux/macOS)
-- Install Python 3.8+ if missing
-- Install Docker if missing
-- Install Docker Compose if missing
-- Install pip if missing
-- Install Python packages (streamlit, pyyaml, docker)
-- Verify installations
-- Handle errors with user guidance
-
-### Configuration
-
-#### `config/projects.yaml`
-```yaml
-projects:
-  - name: user-service
-    path: /path/to/user-service
-    default_branch: main
-    default_env: .env.user-service
-  - name: order-service
-    path: /path/to/order-service
-    default_branch: main
-    default_env: .env.order-service
+logs/
+  <service-name>/
+    run.log
+    error.log
 ```
 
-#### `config/session_state.json`
+#### Features
+- Timestamped logs
+- Service-prefixed entries
+- CLI access for logs
+
+#### CLI Commands
+```
+orchestrator logs <service>
+orchestrator logs <service> --tail
+orchestrator logs <service> --error
+```
+
+---
+
+### 6. Session Management (Ephemeral)
+
+#### Characteristics
+- In-memory state (primary)
+- JSON session file (secondary)
+- File deleted on exit by default
+
+#### File Location
+```
+~/.local-orchestrator/session_<id>.json
+```
+
+#### Sample Structure
 ```json
 {
-  "session_active": true,
-  "selected_projects": ["user-service", "order-service"],
-  "branch_config": {
-    "same_for_all": true,
-    "branch_name": "develop",
-    "overrides": {}
-  },
-  "build_status": {
-    "user-service": "success",
-    "order-service": "failed"
-  },
-  "run_status": {
-    "user-service": "running",
-    "order-service": "stopped"
+  "session_id": "abc123",
+  "created_at": "2026-03-29T10:15:00",
+  "projects": {
+    "user-service": {
+      "status": "running",
+      "pid": 12345,
+      "branch": "develop",
+      "last_error": null
+    }
   }
 }
 ```
 
----
-
-## Development Timeline
-
-### Phase 1: MVP (2-3 hours)
-- Basic Streamlit UI with project selection
-- Simple build button (sequential builds)
-- Docker Compose integration
-- Basic status display
-
-### Phase 2: Core Features (2-3 hours)
-- Branch selection logic
-- Environment file configuration
-- Parallel builds
-- State management
-
-### Phase 3: Failure Recovery (1-2 hours)
-- Build failure handling
-- Run failure handling
-- Selective rebuild/restart
-- Log streaming
-
-**Total Estimated Time**: 6-8 hours
-
----
-
-## Post-Development Enhancements
-
-### Automated Dependency Management
-To be implemented after core functionality is complete:
-
-1. **System Validation** (`scripts/check_dependencies.sh`):
-   - Verify Docker installation and running status
-   - Verify Docker Compose with minimum version check
-   - Verify Python 3.8+ installation
-   - Verify Git installation
-   - Verify pip availability
-   - Generate detailed report of missing/outdated dependencies
-
-2. **Automated Installation** (`scripts/install_dependencies.sh`):
-   - OS detection (Linux distributions, macOS)
-   - Automated installation of missing components
-   - Version validation post-installation
-   - User-friendly error messages and manual installation guidance
-   - Rollback capability on installation failures
-
----
-
-## Setup Requirements
-
-### Prerequisites
-- Docker & Docker Compose installed
-- Python 3.8+
-- Git
-- Project repositories cloned locally
-
-### Installation
-```bash
-cd /home/ritikagrawal/Documents/codebase/setup-repo
-
-# Check if all dependencies are available
-./scripts/check_dependencies.sh
-
-# Install missing dependencies (if any)
-./scripts/install_dependencies.sh
-
-# Run setup
-./scripts/setup.sh
+#### CLI Flag
 ```
-
-### Usage
-```bash
-streamlit run ui/app.py
+orchestrator start --keep-session
 ```
 
 ---
 
-## Key Features Summary
+### 7. Failure Recovery
 
-✅ Beautiful modern UI (Streamlit)  
-✅ Multi-project selection  
-✅ Flexible branch configuration (same for all + overrides)  
-✅ Custom env file paths  
-✅ Parallel builds for speed  
-✅ Parallel runs for efficiency  
-✅ Build failure isolation & recovery  
-✅ Run failure isolation & recovery  
-✅ Resume from failures (no rebuild of successful projects)  
-✅ Real-time status monitoring  
-✅ Log streaming for debugging  
-✅ Session persistence with explicit exit  
-✅ Zero cost (all free tools)  
-✅ Fast setup (< 1 hour for users)  
-✅ Low development time (6-8 hours total)  
+#### Build Failures
+- Logged and isolated
+- Can re-run build for failed services
+
+#### Run Failures
+- Detected via process exit
+- Manual restart supported
+
+---
+
+## Architecture
+
+```
+local-orchestrator/
+├── core/
+│   ├── orchestrator.py
+│   ├── executor.py
+│   ├── git_manager.py
+│   ├── logger.py
+│   ├── state_manager.py
+│   └── strategies/
+│       ├── build_strategy.py
+│       ├── run_strategy.py
+│       └── log_strategy.py
+├── cli/
+│   └── main.py
+├── config/
+│   └── projects.yaml
+├── logs/
+└── README.md
+```
+
+---
+
+## Configuration
+
+### `projects.yaml`
+
+```yaml
+projects:
+  - name: user-service
+    path: /path/to/user-service
+    branch: develop
+    build_command: "npm run build"
+    run_command: "npm start"
+    env_file: .env
+
+  - name: order-service
+    path: /path/to/order-service
+    branch: main
+    run_command: "java -jar app.jar"
+```
+
+---
+
+## Execution Flow
+
+### 1. Start Session
+- Initialize state
+- Create session file
+
+### 2. Git Phase
+- Fetch and checkout branch
+- Fail fast if invalid
+
+### 3. Build Phase (Optional)
+- Execute build commands in parallel
+- Track success/failure
+
+### 4. Run Phase
+- Start processes in parallel
+- Capture PID and logs
+
+### 5. Monitoring
+- Track process status using `poll()`
+- Update state
+
+### 6. Exit
+- Stop all processes
+- Delete session file (unless retained)
+
+---
+
+## State Management
+
+### In-Memory Model
+```python
+{
+  "user-service": {
+    "status": "running",
+    "pid": 12345
+  }
+}
+```
+
+### Responsibilities
+- Track lifecycle
+- Sync with session file
+- Provide runtime status
+
+---
+
+## CLI Interface
+
+### Commands
+```
+orchestrator start
+orchestrator build
+orchestrator run
+orchestrator status
+orchestrator stop
+orchestrator restart <service>
+orchestrator logs <service>
+```
+
+---
+
+## Process Management
+
+### Execution Model
+- Each service runs as independent OS process
+- Managed via `subprocess.Popen`
+
+### Parallelism
+- Implemented using `ThreadPoolExecutor`
+
+### Monitoring
+- Use `process.poll()` to detect failures
+
+---
+
+## Error Classification
+
+- **GIT_ERROR**
+- **BUILD_ERROR**
+- **RUN_ERROR**
+
+---
+
+## Future Enhancements
+
+- Auto-restart policies
+- Session resume
+- Interactive CLI mode
+- Plugin system for strategies
+- Health check support (port/process based)
+
+---
+
+## Key Advantages
+
+✅ Lightweight (no Docker)
+✅ Fast startup and execution
+✅ Language-agnostic service support
+✅ Strong logging and observability
+✅ Failure isolation
+✅ CLI + library flexibility
 
 ---
 
 ## Notes
 
-- Dockerfile discovery uses convention-based search with fallback to manual specification
-- Git operations happen before build phase
-- Docker health checks determine "running" status
-- Auto-refresh UI every 2-5 seconds for real-time updates
-- Session state persists until explicit "Exit" action
-- All builds and runs execute in parallel for maximum speed
+- Assumes services can run independently
+- No dependency graph enforced
+- Logs are primary debugging tool
+- Designed for local developer environments
 
+---
 
 ## To Do
-- Flow 
-  - project setup flow
+
+- Define project setup flow
+- Implement executor module
+- Implement state manager
+- Add CLI argument parsing
+
